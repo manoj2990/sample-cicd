@@ -15,7 +15,7 @@ on:
 
 jobs:
   on-push-job:
-    if: github.event.name == 'push'
+    if: github.event_name == 'push'
     runs-on: ubuntu-latest
     
     steps:
@@ -30,7 +30,7 @@ jobs:
 
   
   on-manual-job:
-    if: github.event.name == 'workflow_dispatch'
+    if: github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
 
     steps:
