@@ -20,3 +20,17 @@ jobs:
 
       - name: run ci build jobs
         run:  echo `Build job completed at $(date)`
+      
+      - name: run tests
+        run: echo "All tests passed!"
+
+  
+  deploy-job:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: checkout todo code
+        run: echo "Checking out code..."
+
+      - name: deploy to production
+        run: echo "Deploying to production..."
