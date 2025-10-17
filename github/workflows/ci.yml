@@ -12,13 +12,11 @@ on:
 
 jobs:
   ci-build-jobs:
-    runs-on: self-hosted
+    runs-on: ubuntu-latest
     
     steps:
       - name: checkout todo code
         run: echo "Checking out code..."
 
       - name: run ci build jobs
-        run: |
-          echo `Running CI build jobs...`
-          echo `Build job completed at $(date)`
+        run:  echo `Build job completed at $(date)`
