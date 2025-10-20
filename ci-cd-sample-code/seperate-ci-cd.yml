@@ -1,0 +1,116 @@
+# ======================================================
+# separate CI/CD Pipeline for Vercel Deployment
+# ======================================================
+
+# CI Pipeline for React Todo App
+name: CI Pipeline for React Todo App
+
+on:
+  push:
+    branches: ["main"]
+  pull_request:
+    branches: ["main"]
+  workflow_dispatch:
+
+jobs:
+  frontend-build:
+    environment: development
+    name: Build and Test Frontend
+    runs-on: ubuntu-latest
+
+    strategy: # define matrix for multiple Node.js versions and it run job in parallel for each version
+      matrix:
+        node-version: [21.x]
+    
+    steps:
+      - name: Checkout code # clone the repo if not already present
+        uses: actions/checkout@v4 # using action tool to checkout code using keyword 'uses'
+      
+      - name: Setup Node.js ${{ matrix.node-version }} # setup Node.js environment for each version in matrix
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node-version }}
+          cache: 'npm' # enable caching for npm dependencies
+          cache-dependency-path: '**/package-lock.json' # spe
+      
+      - name: Install dependencies
+        run: npm ci
+      
+      - name: Run linting
+        run: npm run lint
+        continue-on-error: false
+      
+      - name: Run tests
+        run: npm test -- --coverage --watchAll=false
+        env:
+         CI: true
+
+      - name: List files after build (for debugging)
+        run: ls -la
+      
+      - name: Build application
+        run: npm run build
+
+      - name: List files after build (for debugging)
+        run: ls -la
+      
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: vite-dist
+          path: dist
+          retention-days: 7
+      
+
+# CD Pipeline for deploying for React Todo App to vercel
+
+name: cd pipeline to deploy frontend app to production
+
+on:
+   workflow_run:
+     workflows: ["CI Pipeline for React Todo App"]
+     types:
+       - completed
+    
+   workflow_dispatch:
+
+jobs:
+   deploy-frontend:
+        environment: production
+        name: Deploy Frontend to Production
+        runs-on: ubuntu-latest
+
+        steps:
+            - name: Checkout code
+              uses: actions/checkout@v4
+
+            - name: Setup Node.js environment
+              uses: actions/setup-node@v4
+              with:
+                node-version: '21.x'
+                cache: 'npm'
+                cache-dependency-path: '**/package-lock.json'
+           
+            
+            - name: setup vercel cli
+              run: npm install -g vercel
+            
+            - name: Download build artifacts
+              uses: actions/download-artifact@v4
+
+            - name: List files after download (for debugging)
+              run: ls -la
+
+            - name: Verify build artifacts
+              run: |    
+                echo "Checking downloaded artifacts:"
+                ls -la dist/
+                [ -f "dist/index.html" ] || exit 1
+                echo "Build artifacts verified"
+             
+            
+            - name: Deploy to vercel
+              run: vercel --prod --token ${{ secrets.VERCEL_TOKEN }} --confirm
+
+            - name: Deployment Success Message
+              run: echo "Frontend deployed successfully to production!"

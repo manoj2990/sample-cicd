@@ -1,0 +1,151 @@
+
+
+ name: CI/CD Pipeline
+
+ on:
+     push:
+        branches: [master, main]
+
+        
+     pull_request:
+        branches: [master, main]
+
+     workflow_dispatch:
+    
+ permissions: # set permissions for the workflow 
+     contents: read
+     id-token: write
+
+ env: #define all var/secrets here in one place as env
+      NODE_VERSION: ${{ vars.NODE_VERSION }}
+      DOCKER_HUB_USERNAME: ${{ secrets.DOCKER_HUB_USERNAME }}
+      DOCKER_HUB_ACCESS_TOKEN: ${{ secrets.DOCKER_HUB_ACCESS_TOKEN }}
+      DOCKER_IMAGE_NAME: ${{ vars.DOCKER_IMAGE_NAME }}
+      VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+
+ jobs:
+      # ------------------------------------------
+      #   Continuous Integration (Build & Test)
+      # ------------------------------------------
+      continuous-integration-job: 
+        name: CI Pipeline 
+        runs-on: ubuntu-latest
+        environment: production # job will run only if the environment is production
+
+        steps:
+            - name: checkout repository # check/clone the repo
+              uses: actions/checkout@v4
+            
+            - name: setup node.js # setup node.js env to run the app
+              uses: actions/setup-node@v4
+              with:
+                  node-version: ${{ env.NODE_VERSION }}
+                  cache: 'npm' #use to cache npm modules
+                  cache-dependency-path: '**/package-lock.json' # use package-lock.json as a unique key to identify cache
+
+            - name: install dependencies
+              run: npm ci
+            
+            - name: run eslint
+              run: npm run lint --if-present
+
+            - name: run tests
+              run: npm test --if-present
+            
+            - name: Build Next.js app # build the project & store the build file -> .next
+              run: |
+                npm run build
+
+            
+            - name: show all files
+              run: ls -la .next
+
+            - name: upload production build artifact # upload the build files(.next) at github storage to store as artifact
+              uses: actions/upload-artifact@v4 
+              with:
+                  name: production-build:v${{ github.run_number }} # name of the artifact
+                  path: .next/** # path of build file present in the repo after build , it will upload all files inside .next folder
+                  if-no-files-found: error # if no files found at the given path, it will throw error
+                  include-hidden-files: true # sometime build file store hidden files, so include them too to prevent errors
+              
+      # ------------------------------------------
+      #   Docker Build and Push
+      # ------------------------------------------
+      project-dockerization:
+        name: Dockerize and Push to Docker Hub 
+        runs-on: ubuntu-latest
+        needs: continuous-integration-job # this job will run after successful completion of 'continuous-integration-job'
+        environment: production
+        timeout-minutes: 15
+
+        steps: 
+            - name: checkout repository
+              uses: actions/checkout@v4
+            
+            - name: login to docker hub
+              uses: docker/login-action@v2
+              with:
+                  username: ${{ env.DOCKER_HUB_USERNAME }}
+                  password: ${{ env.DOCKER_HUB_ACCESS_TOKEN }}
+        
+            - name: build and push docker image # build the docker image and push to docker hub
+              uses: docker/build-push-action@v4
+              with:
+                  context: . # it provide the context that use all files in the root of repo to build docker image
+                  file: ./Dockerfile # path of dockerfile that contain instruction to build the image
+                  push: true # push -> true means after building the image, it will push to docker hub
+                  tags: | # tags -> specify the name and version of the docker image & it store two images, one with 'latest' tag and another with run number as version
+                    ${{ env.DOCKER_HUB_USERNAME }}/${{ env.DOCKER_IMAGE_NAME }}:latest
+                    ${{ env.DOCKER_HUB_USERNAME }}/${{ env.DOCKER_IMAGE_NAME }}:v${{ github.run_number }}
+
+
+      # ------------------------------------------
+      #   Deployment Stage
+      # ------------------------------------------
+      continuous-deployment:
+          name: Deploy to Vercel 
+          runs-on: ubuntu-latest
+          needs: project-dockerization # this job will run after successful completion of 'project-dockerization' job
+          environment: production
+          timeout-minutes: 10
+          if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master' # deploy code to procution only when code is merged to main or master branch
+
+          steps: 
+              - name: checkout repository
+                uses: actions/checkout@v4
+              
+              - name: pull the docker image # pull the latest docker image from docker hub
+                run: docker pull ${{ env.DOCKER_HUB_USERNAME }}/${{ env.DOCKER_IMAGE_NAME }}:latest
+              
+              - name: verify docker image # verify the docker image is pulled successfully by listing the docker images
+                run: docker images ${{ env.DOCKER_HUB_USERNAME }}/${{ env.DOCKER_IMAGE_NAME }}:latest
+
+              - name: install vercel CLI
+                run: npm install -g vercel
+
+              - name: deploy to vercel
+                run: vercel --prod --token ${{ env.VERCEL_TOKEN }} --yes
+            
+              - name: success message
+                run: echo "Deployed Successfully to Vercel"
+          
+      # ------------------------------------------
+      #  Notification Stage
+      # ------------------------------------------
+      notify:
+          name: Notify Deployment Status
+          runs-on: ubuntu-latest
+          needs: continuous-deployment
+          if: always() # this job will run always whether previous job is success or failure
+
+          steps:
+              - name: deployment status message
+                run: |
+                    if [ "${{ needs.continuous-deployment.result }}" == "success" ]; then
+                        echo "Deployment Succeeded 🎉"
+                    else
+                        echo "Deployment Failed ❌"
+                    fi
+
+
+
